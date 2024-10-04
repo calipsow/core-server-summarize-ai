@@ -313,11 +313,6 @@ def find_answer_in_text(question: str, text_context: str = ""):
         print(answers)
         return "it seems there is no answer in the text."
 
-    if isinstance(final, str) and not final.startswith("ERROR"):
-        print("\n\nFinal Answer:", final)
-        print("\n\n", answers, "\n\n")
-        return final
-
     # response errored out, code logic failed not the model
     if isinstance(final, str) and final.startswith("ERROR"):
         print("\n\nFailed to resolve the final answer:", final)
@@ -331,6 +326,12 @@ def find_answer_in_text(question: str, text_context: str = ""):
 
         return final
 
+    if isinstance(final, dict):
+        print("\n\nFinal Answer:", final)
+        print("\n\n", answers, "\n\n")
+        return final
+    
+    print("Something went wrong...",final)
     return final
 
 
