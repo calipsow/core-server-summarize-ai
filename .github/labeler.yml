@@ -8,7 +8,6 @@ docs:
               - "!.github/**"
               - "!scripts/**"
               - "!.gitignore"
-              - "!.pre-commit-config.yaml"
 
 internal:
   - all:
