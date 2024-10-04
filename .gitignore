@@ -25,3 +25,9 @@ __pycache__/
 *.swp
 *.swx
 *.swpx
+.cache
+.venv
+app.egg-info
+.mypy_cache
+.coverage
+htmlcov
