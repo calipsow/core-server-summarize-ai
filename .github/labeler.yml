@@ -8,7 +8,6 @@ docs:
               - "!.github/**"
               - "!scripts/**"
               - "!.gitignore"
-
 internal:
   - all:
       - changed-files:

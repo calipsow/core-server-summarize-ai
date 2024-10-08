@@ -1,4 +1,4 @@
-from app.services.llms import pipe, tokenizer
+from app.services.llms import llama
 from app.utils.general import (
     extract_and_validate_json_objects,
     split_text_into_chunks,
@@ -10,6 +10,8 @@ def resolve_the_final_answer(
     question: str,
     resolve_as_json=False,
 ):
+    pipe = llama.get_pipe()
+    tokenizer = llama.get_tokenizer()
     print(f"\n--- Resolving the Final Answer ---\n")
     max_context_size = 2048  # Maximum context size of the model
     max_generated_tokens = 500  # Adjust as needed
@@ -218,6 +220,8 @@ def resolve_the_final_answer(
 
 
 def find_answer_in_text(question: str, text_context: str = ""):
+    pipe = llama.get_pipe()
+    tokenizer = llama.get_tokenizer()
 
     json_structure = '{"Answer":"","Explanation":"","Text Excerpt":""}'
 
@@ -330,8 +334,8 @@ def find_answer_in_text(question: str, text_context: str = ""):
         print("\n\nFinal Answer:", final)
         print("\n\n", answers, "\n\n")
         return final
-    
-    print("Something went wrong...",final)
+
+    print("Something went wrong...", final)
     return final
 
 

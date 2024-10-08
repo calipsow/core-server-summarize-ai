@@ -4,6 +4,9 @@ from bs4 import BeautifulSoup
 
 def extract_and_validate_json_objects(input_string: str) -> list[dict]:
     try:
+        if not isinstance(input_string, str):
+            print("Input string is not a string.", input_string)
+            raise Exception("Input string is not a string.")
         valid_json_objects = []
         idx = 0
         length = len(input_string)
@@ -72,3 +75,43 @@ def remove_html_xml_tags(input_string: str) -> str:
     # Extract text from the parsed HTML/XML, which removes the tags
     cleaned_string = soup.get_text()
     return cleaned_string
+
+
+def concat_json_objects_by_keys(json_objects: list[dict]) -> dict | None:
+    """
+    Concatenate JSON objects by keys to one dict.
+
+    Args:
+        json_objects (list[dict]): The list of JSON objects to filter.
+
+    Returns:
+        list[dict]: The filtered list of JSON objects.
+    """
+    if len(json_objects) == 0:
+        return {}
+
+    if len(json_objects) == 1:
+        return json_objects[0]
+
+    concated_json = {}
+    try:
+
+        for json_obj in json_objects:
+
+            for key, value in json_obj.items():
+
+                if value == "":
+                    continue
+
+                elif key in concated_json:
+                    concated_json[key] += f" {str(value)}"
+
+                else:
+                    concated_json[key] = str(value)
+
+        return concated_json
+
+    except Exception as e:
+        print("Failed to concat json objects", e)
+        print(json_objects)
+        return None

@@ -1,13 +1,12 @@
-from app.services.llms import pipe, tokenizer
+from app.services.llms import llama, utils
 from app.utils.general import (
     extract_and_validate_json_objects,
     split_text_into_chunks,
+    concat_json_objects_by_keys,
 )
 
 
-def finalise_summarized_text(
-    summarized_json: list[dict], title: str, return_json: bool = False
-) -> dict | str | None:
+def finalise_summarized_text(summarized_json: list[dict], title: str) -> dict | None:
     """
     Finalize the summarized text by joining the individual chunks.
 
@@ -22,10 +21,20 @@ def finalise_summarized_text(
         (None): If the finalization fails.
     """
 
-    json_structure = '{"title": "","summary": ""}'
+    json_structure = '{"Title":"","Final Summary":""}'
 
-    finalise_summarized_text_instructions = f"""The text provided json object is an amalgamation of individual summaries of text sections that were part of a single long text with the title: "{title}". Combine all summaries from the provided json objects of the individual text sections into a final text summary that summarizes the original text as a whole as one single text. Always answer in the language of the text title. Answer only with the final summary, nothing else. Keep the summary as short as possible without removing important content. Return the final summary in a json object with the following schema: {json_structure}"""
+    finalise_summarized_text_instructions = f"""
+    Prompt: Analyse carefully the text summaries, each summarize a single text section of one large text with the title: {title}. Understand which informations are important and most relevant from each summary. Then validate your extracted informations carefully and generate, one final summary for the original text. It is absolutely important, that you use the same language as the title of the original text and that you follow this JSON structure for your answer: {json_structure}."""
 
+    result = llama.generate_chat_based_assistant(finalise_summarized_text_instructions)
+
+    if isinstance(result, str):
+        print(result)
+        raise Exception("Failed to load the summarization pipeline or tokenizer.")
+
+    model, tokenizer, messages = result
+
+    print("unpack summarized_json list dicts to one string...")
     # join json objects to one string
     joined_text = ""
     for data in summarized_json:
@@ -63,32 +72,53 @@ def finalise_summarized_text(
             "Summarized answers exceed the maximum input tokens, splitting into smaller chunks."
         )
         # Split the answers into smaller chunks
-        answer_chunks = split_text_into_chunks(joined_text, max_input_tokens)
+        answer_chunks = split_text_into_chunks(
+            joined_text, max_input_tokens, tokenizer=tokenizer
+        )
 
         # Recursively resolve the final answer with the new chunks
         new_summaries = []
         for i, chunk in enumerate(answer_chunks):
-            print(f"\n--- Summarizing Chunk {i+1} ---\n")
+            print(f"\n--- Summarizing Summary Chunk {i+1} ---\n")
+            prompt = f"{finalise_summarized_text_instructions}{chunk}"
             try:
-                streamed = pipe(
-                    f"{finalise_summarized_text_instructions}\n{chunk}",
-                    max_tokens=max_generated_tokens,
+                print(f"Prompt tokens total: {len(tokenizer.encode(prompt))}\n")
+
+                print(f"Max Generated Tokens: {max_generated_tokens}\n")
+
+                print(
+                    f"Context window size: {len(tokenizer.encode(prompt)) + max_generated_tokens}\n"
                 )
+
+                if len(messages) > 1:
+                    messages[1] = {"role": "user", "content": chunk}
+                else:
+                    messages.append({"role": "user", "content": chunk})
+
+                print(f"Messages: {messages}")
+
+                streamed = utils.generate_output_from_model(
+                    model=model,
+                    tokenizer=tokenizer,
+                    messages=messages,
+                    max_new_tokens=max_generated_tokens,
+                )
+
                 data = extract_and_validate_json_objects(streamed)
 
                 if len(data) == 0:
                     print("No JSON object found in the response.")
+                    print(streamed)
                     continue
 
-                data = data[0]
+                data = concat_json_objects_by_keys(data)
 
-                text = ""
+                if not data:
+                    print(f"\n\nFailed to extract summarized text on chunk {i+1}\n\n")
+                    print(streamed)
+                    continue
 
-                for key, value in data.items():
-                    if value != "":
-                        text += f"{key}: {value}\n"
-
-                print(f"\nIntermediate Summary {i+1}: {text}\n")
+                print(f"\nIntermediate Summary {i+1}: {data}\n")
 
                 new_summaries.append(data)
 
@@ -98,33 +128,56 @@ def finalise_summarized_text(
                 continue  # Proceed to the next chunk if an error occurs
 
         # Recursive call with the new summarized answers
-        return (
-            finalise_summarized_text(new_summaries, title, return_json=True)
-            if return_json
-            else finalise_summarized_text(new_summaries, title)
+        print(
+            f"\n\nRecursive call with the new summarized answers: {new_summaries}\n\n"
         )
+        finalized_summary = finalise_summarized_text(new_summaries, title)
+
+        if not finalized_summary:
+            print("Failed to finalize the summarized text.")
+            return None
+
+        return finalized_summary
+
     else:
+        prompt = f"{finalise_summarized_text_instructions}{joined_text}"
         try:
-            final_answer = pipe(
-                f"{finalise_summarized_text_instructions}\n{joined_text}",
-                max_tokens=max_generated_tokens,
+            print(f"Prompt tokens total: {len(tokenizer.encode(prompt))}\n")
+            print(f"Max Generated Tokens: {max_generated_tokens}\n")
+
+            print(
+                f"Context window size: {len(tokenizer.encode(prompt)) + max_generated_tokens}\n"
             )
-            data = extract_and_validate_json_objects(final_answer)
-            final_answer_txt = ""
+
+            if len(messages) > 1:
+                messages[1] = {"role": "user", "content": joined_text}
+            else:
+                messages.append({"role": "user", "content": joined_text})
+
+            print(f"Messages: {messages}")
+
+            streamed = utils.generate_output_from_model(
+                model=model,
+                tokenizer=tokenizer,
+                messages=messages,
+                max_new_tokens=max_generated_tokens,
+            )
+
+            print(streamed)
+
+            data = extract_and_validate_json_objects(streamed)
 
             if len(data) == 0:
                 print("No JSON object found in the response.")
                 raise Exception("No JSON object found in the response.")
 
-            data = data[0]
+            data = concat_json_objects_by_keys(data)
 
-            for key, value in data.items():
-                if value != "":
-                    final_answer_txt += f"{key}: {value}\n"
+            if not data:
+                e = f"\n\nFailed to extract summary from text\n\n"
+                raise Exception(e)
 
-            print(f"\nFinal Summary: {final_answer_txt}\n")
-
-            return final_answer_txt if not return_json else data
+            return data
 
         except Exception as e:
             print("Failed to generate the final answer")
@@ -132,7 +185,7 @@ def finalise_summarized_text(
             return None
 
 
-def summarize_text(text: str, title: str) -> str:
+def summarize_text(text: str, title: str) -> dict | None:
     """
     Summarize the input text using the model.
 
@@ -142,15 +195,27 @@ def summarize_text(text: str, title: str) -> str:
     Returns:
         str: The summarized text.
     """
-    json_structure = '{"title": "","summary": ""}'
+    system_instructions = """
+    Prompt: Understand and analyse the text carefully. Extract the informations which are most important and use them to summarize the text. It is very important, that you use the same language as the text. Follow this JSON structure for your answer: {"Title":"","Summary":""}."""
 
-    system_instructions = f"""Summarize the given text briefly and precisely with a short description. For the resulting summary, formulate a short title with a maximum of 5 words that describes your text summary. The text sections are parts of a larger text from a website, article or other source. The source of the original text has the following title: "{title}". Always answer in the language of the text. Only return the summary and the title of the summary in a json object which has this shema: {json_structure}, nothing else. Keep the summary as short as possible without removing important content."""
+    result = llama.generate_chat_based_assistant(system_instructions)
+
+    if isinstance(result, str):
+        print(result)
+        raise Exception("Failed to load the summarization pipeline or tokenizer.")
+
+    model, tokenizer, messages = result
+
+    print(f"Tokenize System Instructions...")
 
     system_instructions_tokens = len(tokenizer.encode(system_instructions))
 
     # Define the maximum context size and maximum generated tokens
-    max_context_size = 2048
+    max_context_size = 1845
+
     max_generated_tokens = 300  # Adjust as needed
+
+    print(f"Calculate the maximum number of tokens for the input...")
 
     # Calculate the maximum number of tokens for the input
     max_input_tokens = (
@@ -163,28 +228,65 @@ def summarize_text(text: str, title: str) -> str:
         )
         return None
 
-    # Split the text into sections
-    text_chunks = split_text_into_chunks(text, max_input_tokens)
+    print(
+        f"Max Input Tokens: {max_input_tokens}, split the text into sections based on that..."
+    )
+
+    text_chunks = split_text_into_chunks(text, max_input_tokens, tokenizer=tokenizer)
+
     print(f"Text split into {len(text_chunks)} sections.")
 
-    summarized_texts = []
     summarized_json = []
+
     for i, chunk in enumerate(text_chunks):
-        print(f"\n--- Summarizing Chunk {i+1} ---\n", end="\n", flush=True)
+        print(f"\n--- Summarizing Text Section {i+1} ---\n", end="\n")
         try:
-            prompt = f"Prompt:{system_instructions}\nText: {chunk}"
+            prompt = f"{system_instructions}{chunk}"
 
-            summarized_text = pipe(prompt, max_tokens=max_generated_tokens)
+            print(f"Prompt tokens total: {len(tokenizer.encode(prompt))}\n")
 
-            print(f"\nSummarized Text {i+1}: {summarized_text}\n")
+            print(f"Max Generated Tokens: {max_generated_tokens}\n")
+
+            print(
+                f"Total context window size: {len(tokenizer.encode(prompt)) + max_generated_tokens}\n"
+            )
+
+            if len(tokenizer.encode(prompt)) + max_generated_tokens > max_context_size:
+                print(f"Prompt tokens total exceeds the context window size.\n")
+                raise Exception("Prompt tokens total exceeds the context window size.")
+
+            if len(messages) > 1:
+                messages[1] = {"role": "user", "content": chunk}
+
+            else:
+                messages.append({"role": "user", "content": chunk})
+
+            summarized_text = utils.generate_output_from_model(
+                model=model,
+                tokenizer=tokenizer,
+                messages=messages,
+                max_new_tokens=max_generated_tokens,
+            )
+
+            print(
+                f"\n--------------- Summarized Text: --------------------\n{summarized_text}\n"
+            )
 
             data = extract_and_validate_json_objects(summarized_text)
 
             if len(data) == 0:
                 print("No JSON object found in the response.")
+                print(summarized_text)
                 raise Exception("No JSON object found in the response.")
 
-            data = data[0]
+            data = concat_json_objects_by_keys(data)
+
+            if not data:
+                print(f"\n\nFailed to extract summarized text on chunk {i+1}\n\n")
+                print(summarized_text)
+                continue
+
+            print(f"\nIntermediate Summary {i+1}: {data}\n")
 
             summarized_json.append(data)
 
@@ -196,10 +298,32 @@ def summarize_text(text: str, title: str) -> str:
     print(summarized_json)
 
     # Finalize the summarized texts
-    summary = finalise_summarized_text(summarized_json, title, return_json=True)
+    print(f"Finalize the summarized texts...")
 
-    return (
-        summary
-        if isinstance(summary, dict)
-        else {"Error": "Failed to generate the final summary."}
-    )
+    summary = finalise_summarized_text(summarized_json, title)
+
+    print(f"Summarization done! Returning summary: \n\n{summary}")
+
+    return summary
+
+
+def initiate(text: str, title: str) -> dict:
+    """
+    Initiate the summarization process.
+
+    Args:
+        text (str): The input text to summarize.
+        title (str): The title of the input text.
+
+    Returns:
+        dict: The summarized text.
+    """
+    result = summarize_text(text, title)
+
+    if not result:
+        return {"error": "Failed to summarize the text."}
+
+    return result
+
+
+__all__ = ["initiate"]
