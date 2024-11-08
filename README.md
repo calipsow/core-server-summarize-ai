@@ -1,5 +1,10 @@
 # LLama 3.2 3B AI Server implementation
 
+## This Project Is Under Development, Contributions Are Welcome.
+---
+### To get the current env.template config (reach out to [development@callipson.com](mailto:development@callipson.com))
+
+
 ## Server Stack
 
 - ⚡ [**FastAPI**](https://fastapi.tiangolo.com) for the Python backend API..
